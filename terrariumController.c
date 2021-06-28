@@ -1,6 +1,12 @@
 #include <SPI.h>
 #include <WiFi.h>
 #include "ArduinoJson.h"
+#include <DHT.h>
+
+
+#define DHTPIN 13     // what pin we're connected to
+#define DHTTYPE DHT22   // DHT 22  (AM2302)
+DHT dht(DHTPIN, DHTTYPE); //// Initialize DHT sensor for normal 16mhz Arduino
 
 char ssid[] = "dlink-E980";
 char pass[] = "qhlqg92724";
@@ -18,6 +24,7 @@ String response = "";
 
 void setup() {
   Serial.begin(9600);
+  dht.begin();
   while (!Serial) { // Sólo necesario para Arduino Leonardo
     ;
   }
@@ -55,7 +62,6 @@ void loop() {
   // then connect again and send data:
   if (millis() - lastConnectionTime > postingInterval) {
     getParameter();
-    //postHistoric();
   }
 }
 
@@ -65,10 +71,50 @@ void getParameter() {
   Serial.println("\nStarting connection to server...");
   if (client.connect(server, 8080)) {
     String parameters= getRequest("/get-parameter");
-    DynamicJsonDocument doc(1024);
+    DynamicJsonDocument doc(512);
     deserializeJson(doc, parameters);
-    serializeJson(doc[0]["name"], Serial);
-    //for(i
+    char* nombre;
+    int valor;
+    int comparador;
+    int sensorValue;
+
+    for(int i=0; i<=1; i++){
+      nombre = doc[i]["name"];
+      valor = doc[i]["value"];
+      sensorValue=sensorParameters(nombre);
+      comparador=comparator(valor,sensorValue);
+      Serial.print("Valor establecido: ");
+      Serial.print(valor);
+      if(strcmp(nombre, "temperature")==0){
+        Serial.print("ºC");
+      }else{
+        Serial.print("%");
+      }
+      Serial.print(" Valor sensor: ");
+      Serial.print(sensorValue);
+      if(strcmp(nombre, "temperature")==0){
+        Serial.print("ºC");
+      }else{
+        Serial.print("%");
+      }
+      if(strcmp(nombre, "temperature")==0){
+        if(comparador == 1){
+          Serial.println(" Enciende ventilador/apaga termostato");
+        }else if (comparador == -1){
+          Serial.println(" Apaga ventilador/enciende termostato");
+        }else{
+          Serial.println(" Apaga ventilador/apaga termostato");
+        }
+      }else{
+        if(comparador == 1){
+          Serial.println(" Apaga aspersor");
+        }else if (comparador == -1){
+          Serial.println(" Enciende aspersor");
+        }else{
+          Serial.println(" Apaga aspersor");
+        }
+      }
+    }
     //sensores{"temperature": 13,"humidity": 13}
     //sensorData(sensores[doc[i]["name"]],doc[i]["name"]); -->> compare(SensV,doc[i]["value"])
     //llamar a comparador con los valores
@@ -79,6 +125,24 @@ void getParameter() {
   } else {
     Serial.println("connection failed");
   }
+}
+int comparator(int valor, int sensorValue){
+  if(valor<sensorValue){
+    return 1;
+  }else if(valor>sensorValue){
+    return -1;
+  }else{
+    return 0;
+  }
+}
+int sensorParameters(String nombre){
+    //devolver map con elementos
+    //POSTEAR PARAMETROS EN DDBB
+    if(nombre == "temperature"){
+      return round(dht.readTemperature());
+    }else{
+      return round(dht.readHumidity());
+    }
 }
 
 String getRequest(String ruta) {
