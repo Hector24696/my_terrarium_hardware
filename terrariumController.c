@@ -4,18 +4,19 @@
 #include <DHT.h>
 
 
-#define DHTPIN 13     // what pin we're connected to
-#define DHTTYPE DHT22   // DHT 22  (AM2302)
-DHT dht(DHTPIN, DHTTYPE); //// Initialize DHT sensor for normal 16mhz Arduino
+#define DHTPIN 13
+#define DHTTYPE DHT22
+DHT dht(DHTPIN, DHTTYPE);
 
 char ssid[] = "dlink-E980";
 char pass[] = "qhlqg92724";
 
+DynamicJsonDocument sensorValues(64);
+
+
 int status = WL_IDLE_STATUS;
 IPAddress server(192, 168, 0, 104);
-//char server[] = "http://my_terrarium.test";
 WiFiClient client;
-
 
 unsigned long lastConnectionTime = 0;
 const unsigned long postingInterval = 10L * 1000L;
@@ -25,7 +26,9 @@ String response = "";
 void setup() {
   Serial.begin(9600);
   dht.begin();
-  while (!Serial) { // Sólo necesario para Arduino Leonardo
+  sensorValues["temperature"] = 0;
+  sensorValues["humidity"] = 0;
+  while (!Serial) {
     ;
   }
   if (WiFi.status() == WL_NO_SHIELD) {
@@ -38,7 +41,6 @@ void setup() {
   }
   Serial.print(("Firmware version: "));
   Serial.println(WiFi.firmwareVersion());
-
   while (status != WL_CONNECTED) {
     Serial.print("Attempting to connect to SSID: ");
     Serial.println(ssid);
@@ -51,102 +53,140 @@ void setup() {
 
 void loop() {
 
-  // if there's incoming data from the net connection.
-  // send it out the serial port.  This is for debugging
-  // purposes only:
   while (client.available()) {
     char c = client.read();
     Serial.write(c);
   }
-  // if ten seconds have passed since your last connection,
-  // then connect again and send data:
   if (millis() - lastConnectionTime > postingInterval) {
+    sensorGetParameter();
     getParameter();
+    //postParameters();
   }
+  delay(2000);
 }
 
 void getParameter() {
-  char result [20];
   client.stop();
   Serial.println("\nStarting connection to server...");
   if (client.connect(server, 8080)) {
-    String parameters= getRequest("/get-parameter");
-    DynamicJsonDocument doc(512);
+    String parameters = getRequest("/get-parameter");
+    DynamicJsonDocument doc(128);
     deserializeJson(doc, parameters);
+    serializeJson(doc,Serial);
     char* nombre;
     int valor;
     int comparador;
     int sensorValue;
-
-    for(int i=0; i<=1; i++){
+    DynamicJsonDocument actuadores(72);
+    for (int i = 0; i <= 1; i++) {
       nombre = doc[i]["name"];
       valor = doc[i]["value"];
-      sensorValue=sensorParameters(nombre);
-      comparador=comparator(valor,sensorValue);
-      Serial.print("Valor establecido: ");
+      sensorValue = sensorValues[nombre];
+      comparador = comparator(valor, sensorValue);
+
+      Serial.print("\nValor establecido: ");
       Serial.print(valor);
-      if(strcmp(nombre, "temperature")==0){
+      if (strcmp(nombre, "temperature") == 0) {
         Serial.print("ºC");
-      }else{
+      } else {
         Serial.print("%");
       }
+
       Serial.print(" Valor sensor: ");
       Serial.print(sensorValue);
-      if(strcmp(nombre, "temperature")==0){
+      if (strcmp(nombre, "temperature") == 0) {
         Serial.print("ºC");
-      }else{
+      } else {
         Serial.print("%");
       }
-      if(strcmp(nombre, "temperature")==0){
-        if(comparador == 1){
-          Serial.println(" Enciende ventilador/apaga termostato");
-        }else if (comparador == -1){
+      //POST ACTUATOR STATE
+      if (strcmp(nombre, "temperature") == 0) {
+        if (comparador == -1) {
+          actuadores[0]["val"]="termostato";
+          actuadores[0]["st"]=1;
+          actuadores[1]["val"]="ventilador";
+          actuadores[1]["st"]=0;
           Serial.println(" Apaga ventilador/enciende termostato");
-        }else{
-          Serial.println(" Apaga ventilador/apaga termostato");
+        } else if (comparador == 1) {
+          actuadores[0]["val"]="termostato";
+          actuadores[0]["st"]=0;
+          actuadores[1]["val"]="ventilador";
+          actuadores[1]["st"]=1;
+          Serial.println(" Enciende ventilador/apaga termostato");
+        } else {
+          actuadores[0]["val"]="termostato";
+          actuadores[0]["st"]=0;
+          actuadores[1]["val"]="ventilador";
+          actuadores[1]["st"]=0;
+          Serial.println("Apaga ventilador/apaga termostato");
         }
-      }else{
-        if(comparador == 1){
-          Serial.println(" Apaga aspersor");
-        }else if (comparador == -1){
+      } else {
+        if (comparador == -1) {
+          actuadores[2]["val"]="aspersor";
+          actuadores[2]["st"]=1;
           Serial.println(" Enciende aspersor");
-        }else{
+        } else {
+          actuadores[2]["val"]="aspersor";
+          actuadores[2]["st"]=0;
           Serial.println(" Apaga aspersor");
         }
       }
     }
-    //sensores{"temperature": 13,"humidity": 13}
-    //sensorData(sensores[doc[i]["name"]],doc[i]["name"]); -->> compare(SensV,doc[i]["value"])
-    //llamar a comparador con los valores
-    //if actuator state change postStateActuator(); if(c==1){activar X, desactivar Y
+    String meme;
+    serializeJson(actuadores, meme);
+    Serial.println(meme);
+    postRequest("/update-actuators", meme);
+    delay(1000);
+    //lastConnectionTime = millis();
+  } else {
+    Serial.println("connection failed");
+  }
+}
+
+int comparator(int valor, int sensorValue) {
+  if (valor < sensorValue) {
+    return 1;
+  } else if (valor > sensorValue) {
+    return -1;
+  } else {
+    return 0;
+  }
+}
+
+void sensorGetParameter() {
+  sensorValues["temperature"] = sensorParameters("temperature");
+  sensorValues["humidity"] = sensorParameters("humidity");
+}
+
+int sensorParameters(String nombre) {
+  if (nombre == "temperature") {
+    return round(dht.readTemperature());
+  } else {
+    return round(dht.readHumidity());
+  }
+}
+
+void postRequest(String ruta, String body) {
+  client.stop();
+  Serial.println("Posts...");
+  if (client.connect(server, 8080)) {
+    client.println("POST " + ruta + " HTTP/1.1");
+    client.println("Host: 192.168.0.104:8080 ");
     client.println("Connection: close");
-    //client.println();
+    client.println("Content-Type: application/json;");
+    client.print("Content-Length: ");
+    client.println(String(body.length()));
+    client.println();
+    client.println(body);
+    delay(1000);
     lastConnectionTime = millis();
   } else {
     Serial.println("connection failed");
   }
 }
-int comparator(int valor, int sensorValue){
-  if(valor<sensorValue){
-    return 1;
-  }else if(valor>sensorValue){
-    return -1;
-  }else{
-    return 0;
-  }
-}
-int sensorParameters(String nombre){
-    //devolver map con elementos
-    //POSTEAR PARAMETROS EN DDBB
-    if(nombre == "temperature"){
-      return round(dht.readTemperature());
-    }else{
-      return round(dht.readHumidity());
-    }
-}
 
 String getRequest(String ruta) {
-  client.println("GET "+ ruta);
+  client.println("GET " + ruta);
   unsigned long timeout = millis();
   while (client.available() == 0) {
     if (millis() - timeout > 5000) {
@@ -156,6 +196,7 @@ String getRequest(String ruta) {
       return;
     }
   }
+
   String line = "";
   while (client.available())
   {
