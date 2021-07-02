@@ -60,7 +60,8 @@ void loop() {
   if (millis() - lastConnectionTime > postingInterval) {
     sensorGetParameter();
     getParameter();
-    //postParameters();
+    
+    postParameters();
   }
   delay(2000);
 }
@@ -83,7 +84,7 @@ void getParameter() {
       valor = doc[i]["value"];
       sensorValue = sensorValues[nombre];
       comparador = comparator(valor, sensorValue);
-
+  
       Serial.print("\nValor establecido: ");
       Serial.print(valor);
       if (strcmp(nombre, "temperature") == 0) {
@@ -91,7 +92,7 @@ void getParameter() {
       } else {
         Serial.print("%");
       }
-
+      
       Serial.print(" Valor sensor: ");
       Serial.print(sensorValue);
       if (strcmp(nombre, "temperature") == 0) {
@@ -132,10 +133,11 @@ void getParameter() {
         }
       }
     }
+    serializeJson(sensorValues,Serial);
     String meme;
     serializeJson(actuadores, meme);
     Serial.println(meme);
-    postRequest("/update-actuators", meme);
+    postRequest("/update-actuators", meme);     
     delay(1000);
     //lastConnectionTime = millis();
   } else {
@@ -176,7 +178,7 @@ void postRequest(String ruta, String body) {
     client.println("Content-Type: application/json;");
     client.print("Content-Length: ");
     client.println(String(body.length()));
-    client.println();
+    client.println(); 
     client.println(body);
     delay(1000);
     lastConnectionTime = millis();
@@ -196,13 +198,21 @@ String getRequest(String ruta) {
       return;
     }
   }
-
+  
   String line = "";
   while (client.available())
   {
     line = client.readStringUntil('\r');
   }
   return line;
+}
+
+void postParameters(){
+    String sens;
+    serializeJson(sensorValues, Serial);
+    serializeJson(sensorValues, sens);
+    Serial.println(sens);
+    postRequest("/add-to-historic",sens);
 }
 
 void printWifiStatus() {
