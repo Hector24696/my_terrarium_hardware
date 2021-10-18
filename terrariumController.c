@@ -3,19 +3,20 @@
 #include "ArduinoJson.h"
 #include <DHT.h>
 
-
 #define DHTPIN 13
 #define DHTTYPE DHT22
 DHT dht(DHTPIN, DHTTYPE);
 
 char ssid[] = "dlink-E980";
 char pass[] = "qhlqg92724";
+IPAddress server(192, 168, 1, 40);
 
 DynamicJsonDocument sensorValues(64);
 
-
 int status = WL_IDLE_STATUS;
-IPAddress server(192, 168, 0, 104);
+int ventiladorPin= 4;
+int termostatoPin = 5;
+int aspersorPin = 6;
 WiFiClient client;
 
 unsigned long lastConnectionTime = 0;
@@ -28,6 +29,9 @@ void setup() {
   dht.begin();
   sensorValues["temperature"] = 0;
   sensorValues["humidity"] = 0;
+  pinMode(ventiladorPin, OUTPUT);
+  pinMode(termostatoPin, OUTPUT);
+  pinMode(aspersorPin, OUTPUT);
   while (!Serial) {
     ;
   }
@@ -60,7 +64,6 @@ void loop() {
   if (millis() - lastConnectionTime > postingInterval) {
     sensorGetParameter();
     getParameter();
-    
     postParameters();
   }
   delay(2000);
@@ -69,6 +72,7 @@ void loop() {
 void getParameter() {
   client.stop();
   Serial.println("\nStarting connection to server...");
+  Serial.println(server);
   if (client.connect(server, 8080)) {
     String parameters = getRequest("/get-parameter");
     DynamicJsonDocument doc(128);
@@ -108,36 +112,45 @@ void getParameter() {
           actuadores[1]["val"]="ventilador";
           actuadores[1]["st"]=0;
           Serial.println(" Apaga ventilador/enciende termostato");
+          digitalWrite(termostatoPin, HIGH);
+          digitalWrite(ventiladorPin, LOW);
         } else if (comparador == 1) {
           actuadores[0]["val"]="termostato";
           actuadores[0]["st"]=0;
           actuadores[1]["val"]="ventilador";
           actuadores[1]["st"]=1;
           Serial.println(" Enciende ventilador/apaga termostato");
+          digitalWrite(termostatoPin, LOW);
+          digitalWrite(ventiladorPin, HIGH);
         } else {
           actuadores[0]["val"]="termostato";
           actuadores[0]["st"]=0;
           actuadores[1]["val"]="ventilador";
           actuadores[1]["st"]=0;
           Serial.println("Apaga ventilador/apaga termostato");
+          digitalWrite(termostatoPin, LOW);
+          digitalWrite(ventiladorPin, LOW);
         }
       } else {
         if (comparador == -1) {
           actuadores[2]["val"]="aspersor";
           actuadores[2]["st"]=1;
           Serial.println(" Enciende aspersor");
+          digitalWrite(aspersorPin, HIGH);
         } else {
           actuadores[2]["val"]="aspersor";
           actuadores[2]["st"]=0;
           Serial.println(" Apaga aspersor");
+          digitalWrite(aspersorPin, LOW);
+          
         }
       }
     }
     serializeJson(sensorValues,Serial);
-    String meme;
-    serializeJson(actuadores, meme);
-    Serial.println(meme);
-    postRequest("/update-actuators", meme);     
+    String act;
+    serializeJson(actuadores, act);
+    Serial.println(act);
+    postRequest("/update-actuators", act);     
     delay(1000);
     //lastConnectionTime = millis();
   } else {
